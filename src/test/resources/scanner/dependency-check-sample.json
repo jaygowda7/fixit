@@ -1,0 +1,19 @@
+{
+  "dependencies": [
+    {
+      "fileName": "jackson-databind-2.15.0.jar",
+      "vulnerabilities": [
+        {
+          "name": "CVE-2026-12345",
+          "severity": "HIGH",
+          "description": "A vulnerability exists in the affected version.",
+          "cwes": [
+            {
+              "cwe": "CWE-79"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
