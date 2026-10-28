@@ -1,4 +1,4 @@
-package com.fixit.scanner;
+package com.fixit.scanner.owasp;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -8,6 +8,12 @@ import com.fixit.model.Finding;
 import com.fixit.model.ScannerType;
 import com.fixit.model.Severity;
 import com.fixit.model.VulnerableVersionRange;
+import com.fixit.scanner.ScannerAdapter;
+import com.fixit.scanner.owasp.model.DependencyCheckDependency;
+import com.fixit.scanner.owasp.model.DependencyCheckReport;
+import com.fixit.scanner.owasp.model.DependencyCheckSoftware;
+import com.fixit.scanner.owasp.model.DependencyCheckVulnerability;
+import com.fixit.scanner.owasp.model.DependencyCheckVulnerableSoftware;
 
 public class OWASPDependencyCheckAdapter implements ScannerAdapter {
 
@@ -68,20 +74,22 @@ public class OWASPDependencyCheckAdapter implements ScannerAdapter {
 
             	            if (software != null) {
 
-            	                VulnerableVersionRange range =
-            	                        new VulnerableVersionRange();
+            	                VulnerableVersionRange range = new VulnerableVersionRange();
 
-            	                range.setStartIncluding(
-            	                        software.getVersionStartIncluding()
-            	                );
+            	                String startIncluding = software.getVersionStartIncluding();
+            	                String endExcluding = software.getVersionEndExcluding();
 
-            	                range.setEndExcluding(
-            	                        software.getVersionEndExcluding()
-            	                );
+            	                if (startIncluding != null) {
+            	                    range.setStartVersion(startIncluding);
+            	                    range.setStartInclusive(true);
+            	                }
 
-            	                if (range.getStartIncluding() != null
-            	                        || range.getEndExcluding() != null) {
+            	                if (endExcluding != null) {
+            	                    range.setEndVersion(endExcluding);
+            	                    range.setEndInclusive(false);
+            	                }
 
+            	                if (startIncluding != null || endExcluding != null) {
             	                    ranges.add(range);
             	                }
             	            }

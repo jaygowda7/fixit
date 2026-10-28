@@ -7,6 +7,9 @@ import lombok.Setter;
 @Setter
 public class VulnerableVersionRange {
 
-    private String startIncluding;
-    private String endExcluding;
+    private String startVersion;
+    private boolean startInclusive;
+
+    private String endVersion;
+    private boolean endInclusive;
 }

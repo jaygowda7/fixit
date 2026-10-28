@@ -21,5 +21,6 @@ public class Finding {
 	private String location;
 	private boolean remediationAvailable;
 	private List<VulnerableVersionRange> vulnerableVersionRanges;
+	private List<String> availableFixedVersions;
 
 }

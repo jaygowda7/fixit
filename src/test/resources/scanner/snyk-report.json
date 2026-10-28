@@ -1,0 +1,2560 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-15365924",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+      "credit": [
+        "sprabhav7",
+        "rohan-repos"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.0.0,2.18.6)",
+          "[2.19.0-rc1,2.21.1)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.6",
+        "2.21.1"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-core",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-core/security/advisories/GHSA-72hv-8253-57qq",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/b0c428e6f993e1b5ece5c1c3cb2523e887cd52cf",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/pull/1555",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-08-11T05:29:02.098004Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-09-30T11:03:12.701570Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-02T14:04:35.071386Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-02T14:04:35.071386Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-11T05:29:02.098004Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:12.701570Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-core](https://github.com/FasterXML/jackson-core) is a Core Jackson abstractions, basic JSON streaming API implementation\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in which the non-blocking async JSON parser can be made to bypass the `maxNumberLength` constraint (default: 1000 characters) defined in `StreamReadConstraints`. An attacker can cause excessive memory allocation and CPU exhaustion by submitting JSON documents containing extremely long numeric values through the asynchronous parser interface.\n## PoC\nThe following JUnit 5 test demonstrates the vulnerability. It shows that the async parser accepts a 5,000-digit number, whereas the limit should be 1,000.\r\n\r\n``` js\r\npackage tools.jackson.core.unittest.dos;\r\n\r\nimport java.nio.charset.StandardCharsets;\r\n\r\nimport org.junit.jupiter.api.Test;\r\n\r\nimport tools.jackson.core.*;\r\nimport tools.jackson.core.exc.StreamConstraintsException;\r\nimport tools.jackson.core.json.JsonFactory;\r\nimport tools.jackson.core.json.async.NonBlockingByteArrayJsonParser;\r\n\r\nimport static org.junit.jupiter.api.Assertions.*;\r\n\r\n/**\r\n * POC: Number Length Constraint Bypass in Non-Blocking (Async) JSON Parsers\r\n *\r\n * Authors: sprabhav7, rohan-repos\r\n * \r\n * maxNumberLength default = 1000 characters (digits).\r\n * A number with more than 1000 digits should be rejected by any parser.\r\n *\r\n * BUG: The async parser never calls resetInt()/resetFloat() which is where\r\n * validateIntegerLength()/validateFPLength() lives. Instead it calls\r\n * _valueComplete() which skips all number length validation.\r\n *\r\n * CWE-770: Allocation of Resources Without Limits or Throttling\r\n */\r\nclass AsyncParserNumberLengthBypassTest {\r\n\r\n    private static final int MAX_NUMBER_LENGTH = 1000;\r\n    private static final int TEST_NUMBER_LENGTH = 5000;\r\n\r\n    private final JsonFactory factory = new JsonFactory();\r\n\r\n    // CONTROL: Sync parser correctly rejects a number exceeding maxNumberLength\r\n    @Test\r\n    void syncParserRejectsLongNumber() throws Exception {\r\n        byte[] payload = buildPayloadWithLongInteger(TEST_NUMBER_LENGTH);\r\n\t\t\r\n\t\t// Output to console\r\n        System.out.println(\"[SYNC] Parsing \" + TEST_NUMBER_LENGTH + \"-digit number (limit: \" + MAX_NUMBER_LENGTH + \")\");\r\n        try {\r\n            try (JsonParser p = factory.createParser(ObjectReadContext.empty(), payload)) {\r\n                while (p.nextToken() != null) {\r\n                    if (p.currentToken() == JsonToken.VALUE_NUMBER_INT) {\r\n                        System.out.println(\"[SYNC] Accepted number with \" + p.getText().length() + \" digits — UNEXPECTED\");\r\n                    }\r\n                }\r\n            }\r\n            fail(\"Sync parser must reject a \" + TEST_NUMBER_LENGTH + \"-digit number\");\r\n        } catch (StreamConstraintsException e) {\r\n            System.out.println(\"[SYNC] Rejected with StreamConstraintsException: \" + e.getMessage());\r\n        }\r\n    }\r\n\r\n    // VULNERABILITY: Async parser accepts the SAME number that sync rejects\r\n    @Test\r\n    void asyncParserAcceptsLongNumber() throws Exception {\r\n        byte[] payload = buildPayloadWithLongInteger(TEST_NUMBER_LENGTH);\r\n\r\n        NonBlockingByteArrayJsonParser p =\r\n            (NonBlockingByteArrayJsonParser) factory.createNonBlockingByteArrayParser(ObjectReadContext.empty());\r\n        p.feedInput(payload, 0, payload.length);\r\n        p.endOfInput();\r\n\r\n        boolean foundNumber = false;\r\n        try {\r\n            while (p.nextToken() != null) {\r\n                if (p.currentToken() == JsonToken.VALUE_NUMBER_INT) {\r\n                    foundNumber = true;\r\n                    String numberText = p.getText();\r\n                    assertEquals(TEST_NUMBER_LENGTH, numberText.length(),\r\n                        \"Async parser silently accepted all \" + TEST_NUMBER_LENGTH + \" digits\");\r\n                }\r\n            }\r\n            // Output to console\r\n            System.out.println(\"[ASYNC INT] Accepted number with \" + TEST_NUMBER_LENGTH + \" digits — BUG CONFIRMED\");\r\n            assertTrue(foundNumber, \"Parser should have produced a VALUE_NUMBER_INT token\");\r\n        } catch (StreamConstraintsException e) {\r\n            fail(\"Bug is fixed — async parser now correctly rejects long numbers: \" + e.getMessage());\r\n        }\r\n        p.close();\r\n    }\r\n\r\n    private byte[] buildPayloadWithLongInteger(int numDigits) {\r\n        StringBuilder sb = new StringBuilder(numDigits + 10);\r\n        sb.append(\"{\\\"v\\\":\");\r\n        for (int i = 0; i < numDigits; i++) {\r\n            sb.append((char) ('1' + (i % 9)));\r\n        }\r\n        sb.append('}');\r\n        return sb.toString().getBytes(StandardCharsets.UTF_8);\r\n    }\r\n}\r\n```\n\n## Details\n\nDenial of Service (DoS) describes a family of attacks, all aimed at making a system inaccessible to its intended and legitimate users.\n\nUnlike other vulnerabilities, DoS attacks usually do not aim at breaching security. Rather, they are focused on making websites and services unavailable to genuine users resulting in downtime.\n\nOne popular Denial of Service vulnerability is DDoS (a Distributed Denial of Service), an attack that attempts to clog network pipes to the system by generating a large volume of traffic from many machines.\n\nWhen it comes to open source libraries, DoS vulnerabilities allow attackers to trigger such a crash or crippling of the service by using a flaw either in the application code or from the use of open source libraries.\n\nTwo common types of DoS vulnerabilities:\n\n* High CPU/Memory Consumption- An attacker sending crafted requests that could cause the system to take a disproportionate amount of time to process. For example, [commons-fileupload:commons-fileupload](https://security.snyk.io/vuln/SNYK-JAVA-COMMONSFILEUPLOAD-30082).\n\n* Crash - An attacker sending crafted requests that could cause the system to crash. For Example,  [npm `ws` package](https://snyk.io/vuln/npm:ws:20171108)\n\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-core` to version 2.18.6, 2.21.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-72hv-8253-57qq)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/b0c428e6f993e1b5ece5c1c3cb2523e887cd52cf)\n- [GitHub PR](https://github.com/FasterXML/jackson-core/pull/1555)\n",
+      "epssDetails": {
+        "percentile": "0.32712",
+        "probability": "0.00408",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-18401"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-72hv-8253-57qq"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-core",
+      "proprietary": false,
+      "creationTime": "2026-03-01T09:37:38.085145Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-02-28T02:01:05Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-core"
+      },
+      "publicationTime": "2026-03-01T10:24:20.092629Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-02T14:04:35.071386Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+        "com.fasterxml.jackson.core:jackson-core@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.6",
+        "com.fasterxml.jackson.core:jackson-core@2.18.6"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-core",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-15907551",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "credit": [
+        "anyzy2003"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.8.0,2.18.7)",
+          "[2.19.0-rc1,2.21.2)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.7",
+        "2.21.2"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-core",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/74c9ee255d1534c179bc7d3de48941bf39a9079c",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/7ce3622f40e66bd821b5184d6055d8493afac5f3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/issues/1570",
+          "title": "GitHub Issue"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/security/advisories/GHSA-2m67-wjpj-xhg9",
+          "title": "Maintainer's Advisory"
+        }
+      ],
+      "cvssDetails": [],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-05-21T02:01:27.631548Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-05-21T02:01:27.631548Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-core](https://github.com/FasterXML/jackson-core) is a Core Jackson abstractions, basic JSON streaming API implementation\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in the enforcement of document length constraints in blocking, async, and DataInput parser processes. An attacker can cause excessive resource consumption by submitting oversized JSON documents that bypass configured size limits.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-core` to version 2.18.7, 2.21.2 or higher.\n## References\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/74c9ee255d1534c179bc7d3de48941bf39a9079c)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/7ce3622f40e66bd821b5184d6055d8493afac5f3)\n- [GitHub Issue](https://github.com/FasterXML/jackson-core/issues/1570)\n- [Maintainer's Advisory](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-2m67-wjpj-xhg9)\n",
+      "epssDetails": null,
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-2m67-wjpj-xhg9"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-core",
+      "proprietary": false,
+      "creationTime": "2026-04-05T09:08:27.099104Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-04-04T04:17:07Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-core"
+      },
+      "publicationTime": "2026-04-05T09:08:27.357337Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-05-21T02:01:27.631548Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+        "com.fasterxml.jackson.core:jackson-core@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.7",
+        "com.fasterxml.jackson.core:jackson-core@2.18.7"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-core",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-18517159",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+      "credit": [
+        "tonghuaroot (童话)"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[,2.18.8)",
+          "[2.19.0-rc1,2.21.4)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.8",
+        "2.21.4"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-core",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-core/security/advisories/GHSA-r7wm-3cxj-wff9",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/050b429804dce2a7e08f0be1b0b4c3d040fdb9cd",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/4cdd529749da396cc7edf6d4a2aad41d47902641",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/b0c428e6f993e1b5ece5c1c3cb2523e887cd52cf",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/c5941e5aae7fd5aeac55d66933cfb82b9aabeef8",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/pull/1611",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-08-06T06:44:52.613877Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-30T11:03:17.304848Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-04T07:21:28.161032Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-04T07:21:28.161032Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-06T06:44:52.613877Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:17.304848Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-core](https://github.com/FasterXML/jackson-core) is a Core Jackson abstractions, basic JSON streaming API implementation\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in the `NonBlockingUtf8JsonParserBase` file. An attacker can exhaust system memory by streaming JSON input in small chunks to the asynchronous parser, causing unbounded accumulation of digit characters in memory due to missing validation of number length during chunked parsing. This can lead to denial of service by overwhelming the application's memory resources.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-core` to version 2.18.8, 2.21.4 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-r7wm-3cxj-wff9)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/050b429804dce2a7e08f0be1b0b4c3d040fdb9cd)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/4cdd529749da396cc7edf6d4a2aad41d47902641)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/b0c428e6f993e1b5ece5c1c3cb2523e887cd52cf)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/c5941e5aae7fd5aeac55d66933cfb82b9aabeef8)\n- [GitHub PR](https://github.com/FasterXML/jackson-core/pull/1611)\n",
+      "epssDetails": {
+        "percentile": "0.37901",
+        "probability": "0.00463",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-68494"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-642r-3gj9-2pj5",
+          "GHSA-r7wm-3cxj-wff9"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-core",
+      "proprietary": false,
+      "creationTime": "2026-08-04T18:47:52.439694Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-07-21T21:58:53Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-core"
+      },
+      "publicationTime": "2026-08-04T19:29:43.326902Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-04T07:21:28.161032Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+        "com.fasterxml.jackson.core:jackson-core@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.8",
+        "com.fasterxml.jackson.core:jackson-core@2.18.8"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-core",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059179",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+      "credit": [
+        "Sherry Zhou"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.8.0,2.18.11)",
+          "[2.19.0,2.21.7)",
+          "[2.22.0,2.22.3)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.11",
+        "2.21.7",
+        "2.22.3"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-core",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-core/security/advisories/GHSA-7hhh-6rmp-j9qf",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/commit/211cf2c5d91abbec38067f37efc1363cd4e88ee3",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-core/pull/1698",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-24T05:32:04.341951Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-30T11:03:29.585320Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-30T11:03:29.798484Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:29.798484Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-24T05:32:04.341951Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:29.585320Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-core](https://github.com/FasterXML/jackson-core) is a Core Jackson abstractions, basic JSON streaming API implementation\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in the `_reportInvalidToken(int, String, String)` method of `UTF8DataInputJsonParser`, which accumulates invalid token characters into a `StringBuilder` with no check against `ErrorReportConfiguration.getMaxErrorTokenLength()`, unlike `UTF8StreamJsonParser`, `ReaderBasedJsonParser`, and `NonBlockingUtf8JsonParserBase`, which enforce the 256-character default. An attacker can exhaust the JVM heap by submitting a sufficiently long malformed token, since the whole token is copied into the exception message, where a 20-million-character token produces a 20,000,109-character message against 367 characters on the bounded path. This requires the application to create its parser through `JsonFactory.createParser(DataInput)`, and no configuration constrains the path, since `maxDocumentLength` does not apply to `DataInput` sources and `maxStringLength` does not cover it.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-core` to version 2.18.11, 2.21.7, 2.22.3 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-core/security/advisories/GHSA-7hhh-6rmp-j9qf)\n- [GitHub Commit](https://github.com/FasterXML/jackson-core/commit/211cf2c5d91abbec38067f37efc1363cd4e88ee3)\n- [GitHub PR](https://github.com/FasterXML/jackson-core/pull/1698)\n",
+      "epssDetails": {
+        "percentile": "0.39625",
+        "probability": "0.00492",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-89425"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-7hhh-6rmp-j9qf"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-core",
+      "proprietary": false,
+      "creationTime": "2026-09-23T11:43:21.613279Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-23T03:08:57.371000Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-core"
+      },
+      "publicationTime": "2026-09-23T11:43:21.851833Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-30T11:03:29.798484Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+        "com.fasterxml.jackson.core:jackson-core@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.11",
+        "com.fasterxml.jackson.core:jackson-core@2.18.11"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-core",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17434790",
+      "title": "Server-side Request Forgery (SSRF)",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "credit": [
+        "Omkhar Arasaratnam"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.0.0,2.18.8)",
+          "[2.19.0,2.21.4)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.8",
+        "2.21.4"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-hgj6-7826-r7m5",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/1f5a1037b1e9e05920e755cb35f198bcd46667e4",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/5951",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-07-07T11:06:54.243470Z"
+        },
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-07-01T06:56:09.969578Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-08-25T02:01:23.259272Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-25T02:01:23.259272Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-07T11:06:54.243470Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-01T06:56:09.969578Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Server-side Request Forgery (SSRF) in the `JDKFromStringDeserializer` class, which constructs `InetSocketAddress` and resolves the hostname through DNS at deserialization time. An attacker can force the server to issue outbound DNS lookups for chosen hostnames by submitting JSON that is deserialized into a type holding an `InetSocketAddress` field, with no authentication required. The observable effect is limited to DNS resolution of attacker-chosen names, useful for out-of-band interaction or internal resolver probing rather than a full outbound request, and it applies only where the application deserializes untrusted JSON into types containing such fields.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.8, 2.21.4 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-hgj6-7826-r7m5)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/1f5a1037b1e9e05920e755cb35f198bcd46667e4)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/5951)\n",
+      "epssDetails": {
+        "percentile": "0.29446",
+        "probability": "0.00368",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-54514"
+        ],
+        "CWE": [
+          "CWE-918"
+        ],
+        "GHSA": [
+          "GHSA-hgj6-7826-r7m5"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-06-24T06:42:23.270781Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-06-23T21:22:54Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-06-24T06:42:23.433986Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-08-25T02:01:23.259272Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.8"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17440366",
+      "title": "Incomplete List of Disallowed Inputs",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "credit": [
+        "Omkhar Arasaratnam"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.10.0,2.18.8)",
+          "[2.19.0,2.21.4)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.8",
+        "2.21.4"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "critical",
+      "cvssScore": 9.2,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-rmj7-2vxq-3g9f",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/01d1692c8d0ed03e51a0e3c4f8a9e6908e4931e5",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/24529da29fdf46ff94ca38de9ebf31cd188f5e8e",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/5981",
+          "title": "GitHub Issue"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/5983",
+          "title": "GitHub Issue"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/5984",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2026-06-25T14:29:10.953757Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2026-07-07T11:06:57.147694Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "critical",
+          "baseScore": 9.2,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-24T14:06:51.242733Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-24T14:06:51.242733Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-06-25T14:29:10.953757Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-07T11:06:57.147694Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Incomplete List of Disallowed Inputs in the `BasicPolymorphicTypeValidator.Builder.allowIfSubTypeIsArray()` method, which allowlists an array based only on `clazz.isArray()` and does not validate the array's component type. An attacker who controls the deserialized JSON can instantiate types outside the configured allowlist by wrapping them in an array, because array elements without per-element type identifiers are constructed directly with no further validator check.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.8, 2.21.4 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-rmj7-2vxq-3g9f)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/01d1692c8d0ed03e51a0e3c4f8a9e6908e4931e5)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/24529da29fdf46ff94ca38de9ebf31cd188f5e8e)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/5981)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/5983)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/5984)\n",
+      "epssDetails": {
+        "percentile": "0.67520",
+        "probability": "0.01226",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-54513"
+        ],
+        "CWE": [
+          "CWE-184"
+        ],
+        "GHSA": [
+          "GHSA-rmj7-2vxq-3g9f"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-06-24T13:32:25.049317Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-06-23T21:22:15Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-06-24T13:32:25.238415Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-24T14:06:51.242733Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "critical",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.8"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17440598",
+      "title": "Deserialization of Untrusted Data",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P",
+      "credit": [
+        "caveeroo,Omkhar Arasaratnam"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.10.0,2.18.8)",
+          "[2.19.0,2.21.4)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.8",
+        "2.21.4"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "critical",
+      "cvssScore": 9.2,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-j3rv-43j4-c7qm",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/434d6c511de7fdd9872f29157aafb6162d12d8d5",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/5988",
+          "title": "GitHub Issue"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2026-07-07T11:06:56.391314Z"
+        },
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "cvssV3BaseScore": 8.1,
+          "modificationTime": "2026-07-01T06:56:02.511674Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "critical",
+          "baseScore": 9.2,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-25T02:01:55.414356Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-25T02:01:55.414356Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-07T11:06:56.391314Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-01T06:56:02.511674Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Deserialization of Untrusted Data in the `DatabindContext._resolveAndValidateGeneric()` method, which validates only the raw container class of a type identifier against the configured `PolymorphicTypeValidator` and not its nested generic type arguments. An attacker who controls the type identifier can instantiate a denied class, and reach unauthenticated remote code execution through an available gadget, by embedding that class as a generic parameter of an allowlisted container such as `java.util.ArrayList<com.evil.Gadget>`, which passes validation while the nested type is loaded, instantiated, and populated with attacker-controlled values. Exploitation requires polymorphic type validation to be enabled with a configured validator, the application to deserialize untrusted JSON, and a suitable gadget class on the classpath.\n\n## Details\n\nSerialization is a process of converting an object into a sequence of bytes which can be persisted to a disk or database or can be sent through streams. The reverse process of creating object from sequence of bytes is called deserialization. Serialization is commonly used for communication (sharing objects between multiple hosts) and persistence (store the object state in a file or a database). It is an integral part of popular protocols like _Remote Method Invocation (RMI)_, _Java Management Extension (JMX)_, _Java Messaging System (JMS)_, _Action Message Format (AMF)_, _Java Server Faces (JSF) ViewState_, etc.\n\n_Deserialization of untrusted data_ ([CWE-502](https://cwe.mitre.org/data/definitions/502.html)) is when the application deserializes untrusted data without sufficiently verifying that the resulting data will be valid, thus allowing the attacker to control the state or the flow of the execution.\n  \n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.8, 2.21.4 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-j3rv-43j4-c7qm)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/434d6c511de7fdd9872f29157aafb6162d12d8d5)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/5988)\n",
+      "epssDetails": {
+        "percentile": "0.61191",
+        "probability": "0.00999",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-54512"
+        ],
+        "CWE": [
+          "CWE-184",
+          "CWE-502"
+        ],
+        "GHSA": [
+          "GHSA-j3rv-43j4-c7qm"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-06-24T13:41:36.132598Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-06-23T21:21:38Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-06-24T13:41:36.295387Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-25T02:01:55.414356Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "critical",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.8"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17457695",
+      "title": "Improperly Controlled Modification of Dynamically-Determined Object Attributes",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+      "credit": [
+        "Omkhar Arasaratnam"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.8.0.rc1,2.18.9)",
+          "[2.19.0-rc2,2.21.5)",
+          "[2.22.0,2.22.1)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.9",
+        "2.21.5",
+        "2.22.1"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-5jmj-h7xm-6q6v",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/0e1b0b211f7a53baa62ba2f4c9bd006c7bf4d5fa",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/5962",
+          "title": "GitHub Issue"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/5964",
+          "title": "GitHub Issue"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-07-07T11:06:57.890844Z"
+        },
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-07-01T06:56:09.375709Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-25T02:01:55.415320Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-25T02:01:55.415320Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-07T11:06:57.890844Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-01T06:56:09.375709Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Improperly Controlled Modification of Dynamically-Determined Object Attributes in the `BeanDeserializerBase.createContextual()` method, which applies the per-property exclusions through `_handleByNameInclusion()` and then rebuilds the property map from the unfiltered original, overwriting the filtered map and restoring every property the exclusion had removed. An attacker can set fields that were marked ignored, enabling mass assignment, by supplying those property names in untrusted JSON during deserialization. Exploitation requires case-insensitive property matching to be enabled via `@JsonFormat` with `ACCEPT_CASE_INSENSITIVE_PROPERTIES` alongside per-property `@JsonIgnoreProperties`.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.9, 2.21.5, 2.22.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-5jmj-h7xm-6q6v)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/0e1b0b211f7a53baa62ba2f4c9bd006c7bf4d5fa)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/5962)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/5964)\n",
+      "epssDetails": {
+        "percentile": "0.35767",
+        "probability": "0.00443",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-54515"
+        ],
+        "CWE": [
+          "CWE-915"
+        ],
+        "GHSA": [
+          "GHSA-5jmj-h7xm-6q6v"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-06-25T06:59:31.705029Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-06-23T21:23:58Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-06-25T06:59:31.936962Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-25T02:01:55.415320Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.9"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17972437",
+      "title": "Improperly Controlled Modification of Dynamically-Determined Object Attributes",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+      "credit": [
+        "omkhar"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.15.0,2.18.8)",
+          "[2.19.0,2.21.4)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.8",
+        "2.21.4"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-3pjw-73gf-8qr5",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/baa2cdf5ca2b2717fbb88d91955d69d8651df3e4",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/c7c678360624da5bc7eed2152789fa522880db9d",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/5974",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "cvssV3BaseScore": 6.5,
+          "modificationTime": "2026-07-28T11:01:52.236615Z"
+        },
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "cvssV3BaseScore": 6.5,
+          "modificationTime": "2026-07-28T16:04:02.108212Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-25T02:01:55.415746Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-25T02:01:55.415746Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-28T11:01:52.236615Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-07-28T16:04:02.108212Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Improperly Controlled Modification of Dynamically-Determined Object Attributes in the `POJOPropertiesCollector._removeUnwantedIgnorals` process. An attacker can access or modify properties that were intended to be ignored by supplying JSON input with keys matching the renamed property names, thereby bypassing intended access restrictions.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.8, 2.21.4 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-3pjw-73gf-8qr5)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/baa2cdf5ca2b2717fbb88d91955d69d8651df3e4)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/c7c678360624da5bc7eed2152789fa522880db9d)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/5974)\n",
+      "epssDetails": {
+        "percentile": "0.33912",
+        "probability": "0.00423",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-59888"
+        ],
+        "CWE": [
+          "CWE-915"
+        ],
+        "GHSA": [
+          "GHSA-3pjw-73gf-8qr5"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-07-14T22:07:16.364038Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-07-14T18:47:52.324000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-07-14T22:07:16.579145Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-25T02:01:55.415746Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.8"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19256875",
+      "title": "Server-side Request Forgery (SSRF)",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+      "credit": [
+        "Ta Duc Thien"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.0.0, 2.18.9)",
+          "[2.19.0, 2.21.5)",
+          "[2.22.0, 2.22.1)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.9",
+        "2.21.5",
+        "2.22.1"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/331c4a8ef8616a9f2581dd990bd6b9e9d8bca68b",
+          "title": "GitHub Commit jackson-databind-2.21.1"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/2fc7bd9057dd051d7dea0e5fcad89822d0fa5ebd",
+          "title": "GitHub Commit jackson-databind-3.2.1"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-vvgp-rfg2-7rr6",
+          "title": "Maintainer's Advisory"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-09-02T06:03:06.793185Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-24T14:20:03.930322Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-24T14:20:03.930322Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-02T06:03:06.793185Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Server-side Request Forgery (SSRF) through the `STD_INET_ADDRESS` branch in `FromStringDeserializer` in `src/main/java/com/fasterxml/jackson/databind/deser/std/FromStringDeserializer.java`. An attacker can trigger outbound DNS lookups and blind SSRF behavior by supplying a hostname string in JSON that is deserialized into `java.net.InetAddress`. When application code binds untrusted input into an `InetAddress` field or type, the deserializer calls `InetAddress.getByName(value)` on the attacker-controlled string and resolves it before any application validation runs. This lets an attacker force DNS-based callbacks or probe internal hostnames, causing unwanted network egress and leaking resolver-visible information.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.9, 2.21.5, 2.22.1 or higher.\n## References\n- [GitHub Commit jackson-databind-2.21.1](https://github.com/FasterXML/jackson-databind/commit/331c4a8ef8616a9f2581dd990bd6b9e9d8bca68b)\n- [GitHub Commit jackson-databind-3.2.1](https://github.com/FasterXML/jackson-databind/commit/2fc7bd9057dd051d7dea0e5fcad89822d0fa5ebd)\n- [Maintainer's Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-vvgp-rfg2-7rr6)\n",
+      "epssDetails": {
+        "percentile": "0.21488",
+        "probability": "0.00313",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-77310"
+        ],
+        "CWE": [
+          "CWE-918"
+        ],
+        "GHSA": [
+          "GHSA-vvgp-rfg2-7rr6"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-08-25T12:27:57.872856Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-08-24T20:43:19.401000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-08-25T12:27:58.066269Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-24T14:20:03.930322Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.9"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19477042",
+      "title": "Use of Externally-Controlled Input to Select Classes or Code ('Unsafe Reflection')",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+      "credit": [
+        "waydeshi"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.8.0-rc1,2.18.10)",
+          "[2.19.0-rc1,2.21.6)",
+          "[2.22.0-rc1,2.22.2)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.10",
+        "2.21.6",
+        "2.22.2"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/cc6756b61ed90b6b9227f670e0408d5d9bd48551",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/ce26eda3481cd796f76ba4c53ffe1da23b53f166",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/d94bb632becfe0ba96926b9909ab06d1f87aad6d",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/6129",
+          "title": "GitHub PR"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-wjgm-6hv5-3cvf",
+          "title": "Maintainer's Advisory"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-09-04T06:25:11.048489Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:L",
+          "cvssV3BaseScore": 4.8,
+          "modificationTime": "2026-09-30T11:03:16.802710Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-30T11:03:17.703140Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:17.703140Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-04T06:25:11.048489Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:L",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 4.8,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:16.802710Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Use of Externally-Controlled Input to Select Classes or Code ('Unsafe Reflection') through `NioPathDeserializer` in `src/main/java/com/fasterxml/jackson/databind/ext/NioPathDeserializer.java`. An attacker can force `readValue()` to resolve an attacker-controlled `java.nio.file.Path` URI by supplying a non-`file` scheme such as `jar:`, `http:`, `s3:`, or a custom provider scheme in untrusted JSON. That input reaches `new URI(value)` and then `Path.of(uri)`, which falls back to `ServiceLoader<FileSystemProvider>` resolution and can invoke a matching provider’s `getPath(uri)` during deserialization. The result is unintended provider loading and provider-driven path handling inside the application, which can trigger denial of service or other side effects depending on what `FileSystemProvider` implementations are present on the classpath.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.10, 2.21.6, 2.22.2 or higher.\n## References\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/cc6756b61ed90b6b9227f670e0408d5d9bd48551)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/ce26eda3481cd796f76ba4c53ffe1da23b53f166)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/d94bb632becfe0ba96926b9909ab06d1f87aad6d)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/6129)\n- [Maintainer's Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-wjgm-6hv5-3cvf)\n",
+      "epssDetails": {
+        "percentile": "0.42244",
+        "probability": "0.00529",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-19032"
+        ],
+        "CWE": [
+          "CWE-470"
+        ],
+        "GHSA": [
+          "GHSA-wjgm-6hv5-3cvf"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-09-01T10:43:46.751384Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-01T04:51:39.292000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-09-01T10:43:46.909393Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-30T11:03:17.703140Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.10"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19496766",
+      "title": "Deserialization of Untrusted Data",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+      "credit": [
+        "prvazsahnazarov"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[,2.18.10)",
+          "[2.19.0-rc2,2.21.6)",
+          "[2.22.0,2.22.2)"
+        ]
+      },
+      "exploit": "Proof of Concept",
+      "fixedIn": [
+        "2.18.10",
+        "2.21.6",
+        "2.22.2"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.3,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-gx83-3vf8-gh7j",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/eb3b7fc0f9c0d27f471550ac3316b17d1987388f",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/6156",
+          "title": "GitHub Issue"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/6155",
+          "title": "GitHub PR"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+          "cvssV3BaseScore": 5.6,
+          "modificationTime": "2026-09-04T06:27:33.983016Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+          "cvssV3BaseScore": 5.6,
+          "modificationTime": "2026-09-30T11:03:34.100897Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.3,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-02T14:04:04.634280Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.6,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-02T14:04:04.634280Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+          "assigner": "Red Hat",
+          "severity": "medium",
+          "baseScore": 5.6,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-04T06:27:33.983016Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 5.6,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:34.100897Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Deserialization of Untrusted Data in the `isSafeSubType()` method of `DefaultBaseTypeLimitingValidator`, whose denylist of unsafe base types omits `java.lang.Comparable`, so the method returns true for any subtype resolved under a `Comparable` base. An attacker can trigger instantiation of arbitrary classes that implement `Comparable`, such as `java.io.File` to reach path-traversal primitives, by sending JSON with attacker-controlled type identifiers. This requires the application to use a bare `@JsonTypeInfo` with the default validator and no explicit `PolymorphicTypeValidator`, and a property or class whose declared base type is `Comparable`.\r\n\r\n## Workaround\r\n\r\nThis vulnerability can be avoided by configuring an explicit restrictive `PolymorphicTypeValidator`, such as a `BasicPolymorphicTypeValidator` allowlist passed to `activateDefaultTyping()`, instead of relying on the default validator.\r\n\r\n**Note:** The discoverer of this vulnerability reports that \"I have not identified a class implementing Comparable that yields code execution purely through deserialization\".\n\n## Details\n\nSerialization is a process of converting an object into a sequence of bytes which can be persisted to a disk or database or can be sent through streams. The reverse process of creating object from sequence of bytes is called deserialization. Serialization is commonly used for communication (sharing objects between multiple hosts) and persistence (store the object state in a file or a database). It is an integral part of popular protocols like _Remote Method Invocation (RMI)_, _Java Management Extension (JMX)_, _Java Messaging System (JMS)_, _Action Message Format (AMF)_, _Java Server Faces (JSF) ViewState_, etc.\n\n_Deserialization of untrusted data_ ([CWE-502](https://cwe.mitre.org/data/definitions/502.html)) is when the application deserializes untrusted data without sufficiently verifying that the resulting data will be valid, thus allowing the attacker to control the state or the flow of the execution.\n  \n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.10, 2.21.6, 2.22.2 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-gx83-3vf8-gh7j)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/eb3b7fc0f9c0d27f471550ac3316b17d1987388f)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/6156)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/6155)\n",
+      "epssDetails": {
+        "percentile": "0.52142",
+        "probability": "0.00717",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-83557"
+        ],
+        "CWE": [
+          "CWE-502"
+        ],
+        "GHSA": [
+          "GHSA-gx83-3vf8-gh7j"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-09-02T09:16:53.421200Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-01T17:01:12Z",
+      "exploitDetails": {
+        "sources": [
+          "Snyk"
+        ],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Proof of Concept",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Proof of Concept",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-09-02T09:16:53.646709Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-02T14:04:04.634280Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.10"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19778370",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "credit": [
+        "waydeshi"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.14.0-rc1,2.18.10)",
+          "[2.19.0-rc1,2.21.6)",
+          "[2.22.0-rc1,2.22.2)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.10",
+        "2.21.6",
+        "2.22.2"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/a99b7e74c8928f43f6975773a8c862c8316178bd",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/pull/6127",
+          "title": "GitHub PR"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-q4xh-88c3-wmh7",
+          "title": "Maintainer's Advisory"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-15T05:45:51.052405Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-30T11:03:13.252963Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-30T11:03:13.760518Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:13.760518Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-15T05:45:51.052405Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:13.252963Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling via the `CoreXMLDeserializers.Std._deserialize` path in `src/main/java/com/fasterxml/jackson/databind/ext/CoreXMLDeserializers.java`. An attacker can consume excessive CPU by supplying a JSON string bound to a `javax.xml.datatype.Duration` or `XMLGregorianCalendar` field, causing `DatatypeFactory.newDuration(value)` or `newXMLGregorianCalendar(value)` to parse arbitrarily long numeric components. This stalls the request-handling thread and can exhaust server CPU under default deserialization settings, denying service to other users.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.10, 2.21.6, 2.22.2 or higher.\n## References\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/a99b7e74c8928f43f6975773a8c862c8316178bd)\n- [GitHub PR](https://github.com/FasterXML/jackson-databind/pull/6127)\n- [Maintainer's Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-q4xh-88c3-wmh7)\n",
+      "epssDetails": {
+        "percentile": "0.45942",
+        "probability": "0.00581",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-68497"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-q4xh-88c3-wmh7"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-09-14T09:34:42.366475Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-11T19:07:49.404000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-09-14T09:34:42.538004Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-09-30T11:03:13.760518Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.10"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059683",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+      "credit": [
+        "Daniel Birtwhistle"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2.5.0,2.18.11)",
+          "[2.19.0,2.21.7)",
+          "[2.22.0,2.22.3)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.11",
+        "2.21.7",
+        "2.22.3"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "high",
+      "cvssScore": 8.7,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-cxp5-3px4-pw24",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/37ad9b81712cbb9fb62c2d2c1813593252a24b67",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/6204",
+          "title": "GitHub Issue"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-10-03T06:04:31.359098Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-09-30T11:03:48.891590Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 8.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-03T06:04:32.188592Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Snyk",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-03T06:04:32.188592Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-03T06:04:31.359098Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "SUSE",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:48.891590Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in the `resolveForwardReference()` method of `CollectionDeserializer.CollectionReferringAccumulator`, and in the corresponding map accumulators, which perform a linear search of the pending accumulator for every resolved object ID. An attacker can consume quadratic CPU and exhaust a request-time or worker-capacity budget by submitting JSON whose N unresolved object-ID references resolve in reverse order, costing roughly N*(N+1)/2 comparisons, measured at 2,003,000 for N=2,000. This requires the application to deserialize attacker-influenced JSON into an identity-enabled collection or map under `@JsonIdentityInfo`, though it needs no deep nesting or unusual JSON syntax.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.11, 2.21.7, 2.22.3 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-cxp5-3px4-pw24)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/37ad9b81712cbb9fb62c2d2c1813593252a24b67)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/6204)\n",
+      "epssDetails": {
+        "percentile": "0.36408",
+        "probability": "0.00450",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-91777"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-cxp5-3px4-pw24"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-09-23T12:23:18.062486Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-23T03:08:52.570000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-09-23T12:23:18.230681Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-03T06:04:32.188592Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "high",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.11"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    },
+    {
+      "id": "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059685",
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+      "credit": [
+        "Daniel Birtwhistle"
+      ],
+      "semver": {
+        "vulnerable": [
+          "[,2.18.11)",
+          "[2.19.0,2.21.7)",
+          "[2.22.0,2.22.3)"
+        ]
+      },
+      "exploit": "Not Defined",
+      "fixedIn": [
+        "2.18.11",
+        "2.21.7",
+        "2.22.3"
+      ],
+      "patches": [],
+      "insights": {
+        "triageAdvice": null
+      },
+      "language": "java",
+      "severity": "medium",
+      "cvssScore": 6.9,
+      "functions": [],
+      "malicious": false,
+      "isDisputed": false,
+      "moduleName": "com.fasterxml.jackson.core:jackson-databind",
+      "references": [
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-wv8q-qhhj-9h54",
+          "title": "GitHub Advisory"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/commit/2870d1d6dc1b7e1c07ee11dd5b04ab71cddbb577",
+          "title": "GitHub Commit"
+        },
+        {
+          "url": "https://github.com/FasterXML/jackson-databind/issues/6203",
+          "title": "GitHub Issue"
+        }
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "severity": "high",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "cvssV3BaseScore": 7.5,
+          "modificationTime": "2026-10-02T13:31:50.024852Z"
+        },
+        {
+          "assigner": "SUSE",
+          "severity": "medium",
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "cvssV3BaseScore": 5.3,
+          "modificationTime": "2026-09-30T11:03:32.194694Z"
+        }
+      ],
+      "cvssSources": [
+        {
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-02T13:31:50.516071Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "Snyk",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-02T13:31:50.516071Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "assigner": "Red Hat",
+          "severity": "high",
+          "baseScore": 7.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-02T13:31:50.024852Z"
+        },
+        {
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+          "assigner": "SUSE",
+          "severity": "medium",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-30T11:03:32.194694Z"
+        }
+      ],
+      "description": "## Overview\n[com.fasterxml.jackson.core:jackson-databind](https://github.com/FasterXML/jackson-databind) is a library which contains the general-purpose data-binding functionality and tree-model for Jackson Data Processor.\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling in the `_findDeserializer()` method of `TypeDeserializerBase`, which caches every unknown type ID as a distinct key in the `_deserializers` map even when all of them resolve to the same `defaultImpl` fallback. An attacker can grow that cache without bound for the lifetime of the process, exhausting memory over time, by submitting a stream of novel type identifiers. This requires the application to use name-based polymorphism through `@JsonTypeInfo(use = Id.NAME, defaultImpl = ...)`, to accept attacker-controlled type identifiers, and to reuse the mapper instance across requests.\n## Remediation\nUpgrade `com.fasterxml.jackson.core:jackson-databind` to version 2.18.11, 2.21.7, 2.22.3 or higher.\n## References\n- [GitHub Advisory](https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-wv8q-qhhj-9h54)\n- [GitHub Commit](https://github.com/FasterXML/jackson-databind/commit/2870d1d6dc1b7e1c07ee11dd5b04ab71cddbb577)\n- [GitHub Issue](https://github.com/FasterXML/jackson-databind/issues/6203)\n",
+      "epssDetails": {
+        "percentile": "0.36408",
+        "probability": "0.00450",
+        "modelVersion": "v2026.06.15"
+      },
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-91776"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-wv8q-qhhj-9h54"
+        ]
+      },
+      "packageName": "com.fasterxml.jackson.core:jackson-databind",
+      "proprietary": false,
+      "creationTime": "2026-09-23T12:36:49.411577Z",
+      "functions_new": [],
+      "alternativeIds": [],
+      "disclosureTime": "2026-09-23T03:08:57.066000Z",
+      "exploitDetails": {
+        "sources": [],
+        "maturityLevels": [
+          {
+            "type": "secondary",
+            "level": "Not Defined",
+            "format": "CVSSv3"
+          },
+          {
+            "type": "primary",
+            "level": "Not Defined",
+            "format": "CVSSv4"
+          }
+        ]
+      },
+      "packageManager": "maven",
+      "mavenModuleName": {
+        "groupId": "com.fasterxml.jackson.core",
+        "artifactId": "jackson-databind"
+      },
+      "publicationTime": "2026-09-23T12:36:49.642990Z",
+      "severityBasedOn": "CVSS",
+      "modificationTime": "2026-10-02T13:31:50.516071Z",
+      "socialTrendAlert": false,
+      "severityWithCritical": "medium",
+      "from": [
+        "com.fixit.test:vulnerable-maven-project@0.0.1-SNAPSHOT",
+        "com.fasterxml.jackson.core:jackson-databind@2.15.0"
+      ],
+      "upgradePath": [
+        false,
+        "com.fasterxml.jackson.core:jackson-databind@2.18.11"
+      ],
+      "isUpgradable": true,
+      "isPatchable": false,
+      "name": "com.fasterxml.jackson.core:jackson-databind",
+      "version": "2.15.0"
+    }
+  ],
+  "ok": false,
+  "dependencyCount": 3,
+  "org": "jayanthgowda17718",
+  "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\nignore: {}\npatch: {}\n",
+  "isPrivate": true,
+  "licensesPolicy": {
+    "severities": {},
+    "orgLicenseRules": {
+      "AGPL-1.0": {
+        "licenseType": "AGPL-1.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "AGPL-3.0": {
+        "licenseType": "AGPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "Artistic-1.0": {
+        "licenseType": "Artistic-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "Artistic-2.0": {
+        "licenseType": "Artistic-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CDDL-1.0": {
+        "licenseType": "CDDL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CPOL-1.02": {
+        "licenseType": "CPOL-1.02",
+        "severity": "high",
+        "instructions": ""
+      },
+      "EPL-1.0": {
+        "licenseType": "EPL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "GPL-2.0": {
+        "licenseType": "GPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "GPL-3.0": {
+        "licenseType": "GPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "LGPL-2.0": {
+        "licenseType": "LGPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-2.1": {
+        "licenseType": "LGPL-2.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-3.0": {
+        "licenseType": "LGPL-3.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-1.1": {
+        "licenseType": "MPL-1.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-2.0": {
+        "licenseType": "MPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MS-RL": {
+        "licenseType": "MS-RL",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "SimPL-2.0": {
+        "licenseType": "SimPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      }
+    }
+  },
+  "packageManager": "maven",
+  "ignoreSettings": {
+    "adminOnly": false,
+    "reasonRequired": false,
+    "disregardFilesystemIgnores": false,
+    "autoApproveIgnores": false,
+    "approvalWorkflowEnabled": false
+  },
+  "summary": "15 vulnerable dependency paths",
+  "remediation": {
+    "unresolved": [],
+    "upgrade": {
+      "com.fasterxml.jackson.core:jackson-databind@2.15.0": {
+        "upgradeTo": "com.fasterxml.jackson.core:jackson-databind@2.18.11",
+        "upgrades": [
+          "com.fasterxml.jackson.core:jackson-core@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-core@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-databind@2.15.0",
+          "com.fasterxml.jackson.core:jackson-core@2.15.0",
+          "com.fasterxml.jackson.core:jackson-core@2.15.0"
+        ],
+        "vulns": [
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059179",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059683",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059685",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19477042",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19496766",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19778370",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17457695",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-19256875",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-18517159",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17434790",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17440366",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17440598",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-17972437",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-15907551",
+          "SNYK-JAVA-COMFASTERXMLJACKSONCORE-15365924"
+        ]
+      }
+    },
+    "patch": {},
+    "ignore": {},
+    "pin": {}
+  },
+  "filesystemPolicy": false,
+  "filtered": {
+    "ignore": [],
+    "patch": []
+  },
+  "uniqueCount": 15,
+  "projectName": "com.fixit.test:vulnerable-maven-project",
+  "displayTargetFile": "pom.xml",
+  "hasUnknownVersions": false,
+  "path": "C:\\testing\\wrkspace\\vulnerable-maven-project"
+}

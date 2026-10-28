@@ -13,7 +13,7 @@ import com.fixit.model.Finding;
 import com.fixit.model.ScannerType;
 import com.fixit.model.Severity;
 import com.fixit.model.VulnerableVersionRange;
-import com.fixit.scanner.OWASPDependencyCheckAdapter;
+import com.fixit.scanner.owasp.OWASPDependencyCheckAdapter;
 
 class OWASPDependencyCheckAdapterTest {
 
@@ -62,10 +62,13 @@ class OWASPDependencyCheckAdapterTest {
             System.out.println("Vulnerable Ranges:");
 
             for (VulnerableVersionRange range : finding.getVulnerableVersionRanges()) {
-                System.out.println(
-                    "  " + range.getStartIncluding()
-                    + " -> " + range.getEndExcluding()
-                );
+            	System.out.println(
+            	"  " + (range.isStartInclusive() ? "[" : "(")
+            	+ (range.getStartVersion() == null ? "" : range.getStartVersion())
+            	+ ", "
+            	+ (range.getEndVersion() == null ? "" : range.getEndVersion())
+            	+ (range.isEndInclusive() ? "]" : ")")
+            	);
             }
 
             assertEquals(

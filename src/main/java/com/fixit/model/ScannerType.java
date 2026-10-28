@@ -2,8 +2,8 @@ package com.fixit.model;
 
 public enum ScannerType {
 	
-	BLACK_DUCK,
-    VERACODE,
+	SNYK,
+	SEMGREP,
     SONARQUBE,
     OWASP_DEPENDENCY_CHECK
 

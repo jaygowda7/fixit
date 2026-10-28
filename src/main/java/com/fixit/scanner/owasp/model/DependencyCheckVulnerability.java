@@ -1,4 +1,4 @@
-package com.fixit.scanner;
+package com.fixit.scanner.owasp.model;
 
 import java.util.List;
 
