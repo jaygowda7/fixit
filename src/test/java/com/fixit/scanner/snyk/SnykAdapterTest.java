@@ -1,4 +1,4 @@
-package com.fixit.scanner;
+package com.fixit.scanner.snyk;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -13,7 +13,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixit.model.Finding;
 import com.fixit.model.ScannerType;
 import com.fixit.model.Severity;
-import com.fixit.scanner.snyk.SnykAdapter;
 import com.fixit.scanner.snyk.model.SnykReport;
 
 class SnykAdapterTest {

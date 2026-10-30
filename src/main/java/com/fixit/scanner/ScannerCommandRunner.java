@@ -2,9 +2,14 @@
 package com.fixit.scanner;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.fixit.model.CommandExecutionResult;
 import com.fixit.model.ExecutionStatus;
@@ -53,23 +58,20 @@ public class ScannerCommandRunner {
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.directory(workingDirectory.toFile());
-            processBuilder.redirectErrorStream(true);
 
             process = processBuilder.start();
 
             Process runningProcess = process;
 
-            java.util.concurrent.CompletableFuture<String> outputFuture =
-                    java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return new String(
-                                    runningProcess.getInputStream().readAllBytes(),
-                                    java.nio.charset.StandardCharsets.UTF_8
-                            );
-                        } catch (IOException e) {
-                            throw new java.util.concurrent.CompletionException(e);
-                        }
-                    });
+            CompletableFuture<String> standardOutputFuture =
+                    CompletableFuture.supplyAsync(
+                            () -> readStream(runningProcess.getInputStream())
+                    );
+
+            CompletableFuture<String> errorOutputFuture =
+                    CompletableFuture.supplyAsync(
+                            () -> readStream(runningProcess.getErrorStream())
+                    );
 
             boolean completed = process.waitFor(
                     timeoutSeconds,
@@ -77,22 +79,31 @@ public class ScannerCommandRunner {
             );
 
             if (!completed) {
-                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.descendants()
+                        .forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
                 process.waitFor();
 
                 result.setStatus(ExecutionStatus.TIMED_OUT);
                 result.setExitCode(null);
-                result.setStandardOutput(outputFuture.get(5, TimeUnit.SECONDS));
+                result.setStandardOutput(
+                        standardOutputFuture.get(5, TimeUnit.SECONDS)
+                );
                 result.setErrorOutput(
                         "Scanner command exceeded timeout of "
-                                + timeoutSeconds + " seconds"
+                                + timeoutSeconds + " seconds\n"
+                                + errorOutputFuture.get(5, TimeUnit.SECONDS)
                 );
 
                 return result;
             }
 
-            result.setStandardOutput(outputFuture.get(5, TimeUnit.SECONDS));
+            result.setStandardOutput(
+                    standardOutputFuture.get(5, TimeUnit.SECONDS)
+            );
+            result.setErrorOutput(
+                    errorOutputFuture.get(5, TimeUnit.SECONDS)
+            );
 
             int exitCode = process.exitValue();
             result.setExitCode(exitCode);
@@ -101,7 +112,6 @@ public class ScannerCommandRunner {
                             ? ExecutionStatus.SUCCESS
                             : ExecutionStatus.FAILED
             );
-            result.setErrorOutput("");
 
             return result;
 
@@ -110,17 +120,20 @@ public class ScannerCommandRunner {
             result.setExitCode(null);
             result.setStandardOutput("");
             result.setErrorOutput(
-                    "Failed to start scanner command: " + e.getMessage()
+                    "Failed to start or read scanner process: "
+                            + e.getMessage()
             );
 
             return result;
 
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-
             if (process != null && process.isAlive()) {
+                process.descendants()
+                        .forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
             }
+
+            Thread.currentThread().interrupt();
 
             result.setStatus(ExecutionStatus.FAILED);
             result.setExitCode(null);
@@ -129,10 +142,10 @@ public class ScannerCommandRunner {
 
             return result;
 
-        } catch (java.util.concurrent.ExecutionException
-                | java.util.concurrent.TimeoutException e) {
-
+        } catch (ExecutionException | TimeoutException e) {
             if (process != null && process.isAlive()) {
+                process.descendants()
+                        .forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
             }
 
@@ -151,6 +164,17 @@ public class ScannerCommandRunner {
                             System.nanoTime() - startTime
                     )
             );
+        }
+    }
+
+    private String readStream(InputStream inputStream) {
+        try (inputStream) {
+            return new String(
+                    inputStream.readAllBytes(),
+                    StandardCharsets.UTF_8
+            );
+        } catch (IOException e) {
+            throw new java.util.concurrent.CompletionException(e);
         }
     }
 }

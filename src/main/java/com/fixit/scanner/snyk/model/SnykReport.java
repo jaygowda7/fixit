@@ -15,4 +15,7 @@ public class SnykReport {
     private List<SnykVulnerability> vulnerabilities;
     private String displayTargetFile;
     private String projectName;
+    
+    private Boolean ok;
+    private Integer dependencyCount;
 }
