@@ -14,5 +14,6 @@ public class ScannerExecutionSummary {
     private ScannerExecutionOutcome outcome;
     private CommandExecutionResult executionResult;
     private List<Finding> findings;
+    private int skippedFindingsCount;
     private String message;
 }

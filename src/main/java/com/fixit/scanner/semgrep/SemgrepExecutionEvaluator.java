@@ -14,7 +14,9 @@ import com.fixit.model.ScannerExecutionSummary;
 public class SemgrepExecutionEvaluator {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final SemgrepAdapter semgrepAdapter = new SemgrepAdapter();
+
+    private final SemgrepAdapter semgrepAdapter =
+            new SemgrepAdapter();
 
     public ScannerExecutionSummary evaluate(
             CommandExecutionResult executionResult,
@@ -73,10 +75,14 @@ public class SemgrepExecutionEvaluator {
                 return summary;
             }
 
-            List<Finding> findings =
-                    semgrepAdapter.parseFindings(reportJson);
+            SemgrepParseResult parseResult =
+                    semgrepAdapter.parseReport(reportJson);
+
+            List<Finding> findings = parseResult.getFindings();
 
             summary.setFindings(findings);
+            summary.setSkippedFindingsCount(
+                    parseResult.getSkippedFindingsCount());
 
             Integer exitCode = executionResult.getExitCode();
 
@@ -90,23 +96,43 @@ public class SemgrepExecutionEvaluator {
                 return summary;
             }
 
-            summary.setOutcome(
-                    findings.isEmpty()
-                            ? ScannerExecutionOutcome.COMPLETED
-                            : ScannerExecutionOutcome.COMPLETED_WITH_FINDINGS);
+            if (summary.getSkippedFindingsCount() > 0) {
 
-            summary.setMessage(
-                    findings.isEmpty()
-                            ? "Semgrep scan completed with no findings"
-                            : "Semgrep scan completed with findings");
+                summary.setOutcome(
+                        ScannerExecutionOutcome.PARTIALLY_COMPLETED);
+
+                summary.setMessage(
+                        "Semgrep scan partially completed; skipped "
+                                + summary.getSkippedFindingsCount()
+                                + " incomplete findings");
+
+            } else if (findings.isEmpty()) {
+
+                summary.setOutcome(
+                        ScannerExecutionOutcome.COMPLETED);
+
+                summary.setMessage(
+                        "Semgrep scan completed with no findings");
+
+            } else {
+
+                summary.setOutcome(
+                        ScannerExecutionOutcome.COMPLETED_WITH_FINDINGS);
+
+                summary.setMessage(
+                        "Semgrep scan completed with findings");
+            }
 
             return summary;
 
         } catch (Exception e) {
+
             summary.setOutcome(ScannerExecutionOutcome.FAILED);
+
             summary.setMessage(
                     "Failed to validate or parse Semgrep report: "
                             + e.getMessage());
+
             return summary;
         }
     }

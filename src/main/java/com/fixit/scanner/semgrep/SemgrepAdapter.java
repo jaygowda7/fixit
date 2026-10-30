@@ -17,6 +17,10 @@ public class SemgrepAdapter implements ScannerAdapter {
 
     @Override
     public List<Finding> parseFindings(String scannerOutput) {
+        return parseReport(scannerOutput).getFindings();
+    }
+
+    public SemgrepParseResult parseReport(String scannerOutput) {
 
         System.out.println("[SEMGREP] Starting to parse report...");
 
@@ -25,11 +29,17 @@ public class SemgrepAdapter implements ScannerAdapter {
             JsonNode results = report.get("results");
 
             List<Finding> findings = new ArrayList<>();
+            int skippedFindingsCount = 0;
 
             if (results == null || !results.isArray()) {
                 System.out.println(
                         "[SEMGREP] Report contains no valid results list.");
-                return findings;
+
+                SemgrepParseResult parseResult = new SemgrepParseResult();
+                parseResult.setFindings(findings);
+                parseResult.setSkippedFindingsCount(0);
+
+                return parseResult;
             }
 
             for (JsonNode result : results) {
@@ -44,11 +54,26 @@ public class SemgrepAdapter implements ScannerAdapter {
                 String scannerSeverity =
                         extra.path("severity").asText(null);
 
-                // Semgrep's severity is normally stored inside extra.
-                // Fall back to the result-level field if necessary.
+                // Fall back to result-level severity if extra severity is missing.
                 if (scannerSeverity == null) {
                     scannerSeverity =
                             result.path("severity").asText(null);
+                }
+
+                // Skip findings that do not contain essential information.
+                if (ruleId == null || ruleId.isBlank()
+                        || component == null || component.isBlank()
+                        || line <= 0
+                        || message == null || message.isBlank()
+                        || scannerSeverity == null
+                        || scannerSeverity.isBlank()) {
+
+                    skippedFindingsCount++;
+
+                    System.out.println(
+                            "[SEMGREP] Skipping incomplete finding: " + ruleId);
+
+                    continue;
                 }
 
                 Finding finding = new Finding();
@@ -70,13 +95,7 @@ public class SemgrepAdapter implements ScannerAdapter {
                 finding.setDescription(message);
                 finding.setSeverity(mapSeverity(scannerSeverity));
                 finding.setComponent(component);
-
-                finding.setLocation(
-                        component == null
-                                ? null
-                                : line > 0
-                                        ? component + ":" + line
-                                        : component);
+                finding.setLocation(component + ":" + line);
 
                 finding.setCurrentVersion(null);
                 finding.setFixedVersion(null);
@@ -90,7 +109,15 @@ public class SemgrepAdapter implements ScannerAdapter {
             System.out.println(
                     "[SEMGREP] Total findings parsed: " + findings.size());
 
-            return findings;
+            System.out.println(
+                    "[SEMGREP] Total findings skipped: "
+                            + skippedFindingsCount);
+
+            SemgrepParseResult parseResult = new SemgrepParseResult();
+            parseResult.setFindings(findings);
+            parseResult.setSkippedFindingsCount(skippedFindingsCount);
+
+            return parseResult;
 
         } catch (Exception e) {
             System.out.println(

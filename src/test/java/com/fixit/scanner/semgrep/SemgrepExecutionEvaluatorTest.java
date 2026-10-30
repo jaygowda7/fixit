@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import com.fixit.model.CommandExecutionResult;
 import com.fixit.model.ExecutionStatus;
 import com.fixit.model.ScannerExecutionOutcome;
+import com.fixit.model.ScannerExecutionSummary;
 import com.fixit.model.ScannerType;
 
 class SemgrepExecutionEvaluatorTest {
@@ -247,6 +248,90 @@ class SemgrepExecutionEvaluatorTest {
 				() -> evaluator.evaluate(null, null));
 
 		assertEquals("Execution result cannot be null", exception.getMessage());
+	}
+
+	@Test
+	void shouldReturnPartiallyCompletedWhenAllFindingsAreIncomplete() {
+
+		CommandExecutionResult executionResult = createSuccessfulExecutionResult();
+
+		String reportJson = """
+				{
+				    "version": "1.56.0",
+				    "results": [
+				        {
+				            "check_id": "incomplete-rule",
+				            "path": "VulnerableDemo.java",
+				            "start": {"line": 10},
+				            "extra": {
+				                "severity": "ERROR"
+				            }
+				        }
+				    ],
+				    "errors": []
+				}
+				""";
+
+		ScannerExecutionSummary summary = evaluator.evaluate(executionResult, reportJson);
+
+		assertEquals(ScannerExecutionOutcome.PARTIALLY_COMPLETED, summary.getOutcome());
+
+		assertEquals(0, summary.getFindings().size());
+		assertEquals(1, summary.getSkippedFindingsCount());
+
+		assertEquals("Semgrep scan partially completed; skipped 1 incomplete findings", summary.getMessage());
+	}
+
+	@Test
+	void shouldReturnPartiallyCompletedWhenValidAndIncompleteFindingsExist() {
+
+		CommandExecutionResult executionResult = createSuccessfulExecutionResult();
+
+		String reportJson = """
+				{
+				    "version": "1.56.0",
+				    "results": [
+				        {
+				            "check_id": "incomplete-rule",
+				            "path": "VulnerableDemo.java",
+				            "start": {"line": 10},
+				            "extra": {
+				                "severity": "ERROR"
+				            }
+				        },
+				        {
+				            "check_id": "valid-rule",
+				            "path": "VulnerableDemo.java",
+				            "start": {"line": 20},
+				            "extra": {
+				                "message": "Potential SQL injection",
+				                "severity": "ERROR"
+				            }
+				        }
+				    ],
+				    "errors": []
+				}
+				""";
+
+		ScannerExecutionSummary summary = evaluator.evaluate(executionResult, reportJson);
+
+		assertEquals(ScannerExecutionOutcome.PARTIALLY_COMPLETED, summary.getOutcome());
+
+		assertEquals(1, summary.getFindings().size());
+		assertEquals(1, summary.getSkippedFindingsCount());
+
+		assertEquals("valid-rule", summary.getFindings().get(0).getVulnerabilityId());
+	}
+
+	private CommandExecutionResult createSuccessfulExecutionResult() {
+
+		CommandExecutionResult result = new CommandExecutionResult();
+
+		result.setScanner(ScannerType.SEMGREP);
+		result.setStatus(ExecutionStatus.SUCCESS);
+		result.setExitCode(0);
+
+		return result;
 	}
 
 }
